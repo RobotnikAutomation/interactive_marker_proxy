@@ -43,35 +43,38 @@ public:
   ros::NodeHandle nh_;
   ros::Publisher pub_;
   tf::TransformListener tf_;
-  interactive_markers::InteractiveMarkerClient client_;
+  interactive_markers::InteractiveMarkerClient  *client_;
   std::string topic_ns_;
   std::string target_frame_;
   ros::ServiceServer service_;
   std::map<std::string, std::string> status_text_;
   ros::Timer timer_;
+  double update_rate_;
+  ros::NodeHandle private_nh;
 
   std::map<std::string, visualization_msgs::InteractiveMarker> int_markers_;
 
-  Proxy(std::string target_frame, std::string topic_ns) :
-      client_(tf_, target_frame, topic_ns), topic_ns_(topic_ns), target_frame_(target_frame)
+  Proxy(ros::NodeHandle h): nh_(h),private_nh("~")
   {
-    ROS_INFO_STREAM("Subscribing to " << topic_ns);
-    ROS_INFO_STREAM("Target frame set to " << target_frame);
+    private_nh.param<double>("update_rate", update_rate_, 30.0f);
+    target_frame_ = "map";
+    private_nh.param<std::string>("target_frame", target_frame_, target_frame_);
+    topic_ns_ = "interactive_marker";
+    private_nh.param<std::string>("topic_ns", topic_ns_, topic_ns_);
 
-    client_.setInitCb(boost::bind(&Proxy::initCb, this, _1));
-    client_.setUpdateCb(boost::bind(&Proxy::updateCb, this, _1));
-    client_.setResetCb(boost::bind(&Proxy::resetCb, this, _1));
-    client_.setStatusCb(boost::bind(&Proxy::statusCb, this, _1, _2, _3));
-    client_.subscribe(topic_ns_);
+    ROS_INFO_STREAM("Subscribing to " << topic_ns_);
+    ROS_INFO_STREAM("Target frame set to " << target_frame_);
+    client_ = new InteractiveMarkerClient(tf_, target_frame_, topic_ns_);
+    client_->setInitCb(boost::bind(&Proxy::initCb, this, _1));
+    client_->setUpdateCb(boost::bind(&Proxy::updateCb, this, _1));
+    client_->setResetCb(boost::bind(&Proxy::resetCb, this, _1));
+    client_->setStatusCb(boost::bind(&Proxy::statusCb, this, _1, _2, _3));
+    client_->subscribe(topic_ns_);
 
     pub_ = nh_.advertise<visualization_msgs::InteractiveMarkerUpdate>(topic_ns_ + "/tunneled/update", 1000);
 
     service_ = nh_.advertiseService(topic_ns_ + "/tunneled/get_init", &Proxy::getInit, this);
-
-    ros::NodeHandle private_nh("~");
-    double update_rate;
-    private_nh.param<double>("update_rate", update_rate, 30.0f);
-    timer_ = nh_.createTimer(ros::Duration(1.0 / update_rate), boost::bind(&Proxy::timerCb, this, _1));
+    timer_ = nh_.createTimer(ros::Duration(1.0 / update_rate_), boost::bind(&Proxy::timerCb, this, _1));
   }
 
   typedef visualization_msgs::InteractiveMarkerInitConstPtr InitConstPtr;
@@ -80,7 +83,7 @@ public:
 
   void timerCb(const ros::TimerEvent&)
   {
-    client_.update();
+    client_->update();
   }
 
   bool getInit(interactive_marker_proxy::GetInit::Request& request,
@@ -151,9 +154,11 @@ public:
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "interactive_marker_proxy");
-  {
-    ros::NodeHandle nh;
-    Proxy proxy(nh.resolveName("target_frame"), nh.resolveName("topic_ns"));
-    ros::spin();
-  }
+
+  ros::NodeHandle nh;
+  //ROS_INFO("Starting..");
+   //Proxy proxy(nh.resolveName("target_frame"), nh.resolveName("topic_ns"));
+  Proxy proxy(nh);
+  ros::spin();
+
 }
